@@ -1,14 +1,15 @@
 <?php
 // ========================================
-// FILE: staff_sales.php - ยอดขายพนักงาน
+// FILE: order_list.php - รายการคำสั่งซื้อ
 // ========================================
-// ไฟล์นี้แสดงรายชื่อพนักงานและยอดขายของแต่ละคน
-// ⚠️ สำคัญ: เฉพาะ admin เท่านั้นที่สามารถเข้าได้
+// ไฟล์นี้แสดงรายการคำสั่งซื้อทั้งหมด
+// ปกติใช้ JOIN เพื่อดึงข้อมูลจากหลายตาราง (orders + users)
 
 // ✅ เชื่อมต่อฐานข้อมูล
-require 'db.php';
+include "db.php";
 
 // ❌ เช็คว่า login แล้วหรือไม่
+// - ถ้าไม่ login จะส่งกลับไปหน้า Login.php
 if (!isset($_SESSION['user'])) {
     header("Location: Login.php");
     exit();
@@ -17,17 +18,17 @@ if (!isset($_SESSION['user'])) {
 // ✅ ดึงข้อมูลผู้ใช้ปัจจุบันจาก session
 $user = $_SESSION['user'];
 
-// 👑 เช็คว่าเป็น admin เท่านั้น
-// - ถ้าไม่ใช่ admin (เช่น staff) จะส่งกลับไปหน้า dashboard
-// - $user['role'] = 'admin' หรือ 'staff'
-if ($user['role'] !== 'admin') {
-    header("Location: dashboard.php");
-    exit();
-}
-
-// 📊 ดึงรายชื่อพนักงานทั้งหมด
-// - SELECT user_id, name, email FROM users = ดึงข้อมูลพนักงาน
-$sql = "SELECT user_id, name, email FROM users";
+// 📊 ดึงรายการคำสั่งซื้อทั้งหมด พร้อมชื่อพนักงาน (join ตารางกับ users)
+// - SELECT = ดึงข้อมูล
+// - JOIN users = รวมข้อมูลจากตาราง users
+// - ON = เงื่อนไขการรวม (orders.user_id = users.user_id)
+// - ORDER BY order_date DESC = เรียงลำดับจากวันที่ใหม่สุดไปเก่าสุด
+$sql = "
+SELECT orders.order_id, orders.order_date, users.name
+FROM orders
+JOIN users ON orders.user_id = users.user_id
+ORDER BY orders.order_date DESC
+";
 $result = $conn->query($sql);
 ?>
 <!DOCTYPE html>
@@ -35,7 +36,7 @@ $result = $conn->query($sql);
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ยอดขายพนักงาน — Inventory</title>
+    <title>รายการคำสั่งซื้อ — Inventory</title>
     <link rel="stylesheet" href="../Front/style.css">
 </head>
 <body class="dashboard-body">
@@ -59,8 +60,8 @@ $result = $conn->query($sql);
         <a href="dashboard.php"  class="nav-item"><span class="nav-icon">🏠</span> Dashboard</a>
         <a href="products.php"   class="nav-item"><span class="nav-icon">📦</span> จัดการสินค้า</a>
         <a href="orders.php"     class="nav-item"><span class="nav-icon">🛒</span> สั่งซื้อสินค้า</a>
-        <a href="order_list.php" class="nav-item"><span class="nav-icon">📋</span> รายการคำสั่งซื้อ</a>
-        <a href="staff_sales.php" class="nav-item active"><span class="nav-icon">📊</span> ยอดขายพนักงาน</a>
+        <a href="order_list.php" class="nav-item active"><span class="nav-icon">📋</span> รายการคำสั่งซื้อ</a>
+        <a href="staff_sales.php" class="nav-item"><span class="nav-icon">📊</span> ยอดขายพนักงาน</a>
     </nav>
     <div class="sidebar-logout">
         <a href="logout.php" class="logout-btn"><span>🚪</span> ออกจากระบบ</a>
@@ -72,11 +73,11 @@ $result = $conn->query($sql);
 
     <!-- 🔝 แท็บนำทางด้านบน -->
     <nav class="topnav">
-        <a href="dashboard.php"   class="topnav-tab">🏠 Dashboard</a>
-        <a href="products.php"    class="topnav-tab">📦 จัดการสินค้า</a>
-        <a href="orders.php"      class="topnav-tab">🛒 สั่งซื้อสินค้า</a>
-        <a href="order_list.php"  class="topnav-tab">📋 รายการคำสั่งซื้อ</a>
-        <a href="staff_sales.php" class="topnav-tab active">📊 ยอดขายพนักงาน</a>
+        <a href="dashboard.php"  class="topnav-tab">🏠 Dashboard</a>
+        <a href="products.php"   class="topnav-tab">📦 จัดการสินค้า</a>
+        <a href="orders.php"     class="topnav-tab">🛒 สั่งซื้อสินค้า</a>
+        <a href="order_list.php" class="topnav-tab active">📋 รายการคำสั่งซื้อ</a>
+        <a href="staff_sales.php" class="topnav-tab">📊 ยอดขายพนักงาน</a>
     </nav>
 
     <div class="page-content">
@@ -85,42 +86,36 @@ $result = $conn->query($sql);
         <div class="breadcrumb">
             <a href="dashboard.php">Dashboard</a>
             <span class="sep">›</span>
-            <span class="current">ยอดขายพนักงาน</span>
+            <span class="current">รายการคำสั่งซื้อ</span>
         </div>
 
-        <!-- 👥 ตารางรายชื่อพนักงาน -->
+        <!-- 📋 ตารางรายการคำสั่งซื้อ -->
         <div class="card">
             <div class="card-header">
-                <h2>👥 รายชื่อพนักงานทั้งหมด</h2>
+                <h2>📋 รายการคำสั่งซื้อทั้งหมด</h2>
+                <a href="orders.php" class="btn btn-primary btn-lg">+ สร้างคำสั่งซื้อใหม่</a>
             </div>
             <div class="table-wrap">
                 <table class="data-table">
                     <thead>
                         <tr>
-                            <th>🔑 ID</th>
-                            <th>👤 ชื่อพนักงาน</th>
-                            <th>✉️ อีเมล</th>
-                            <th>📊 รายงาน</th>
+                            <th>🔑 Order ID</th>
+                            <th>📅 วันที่สั่งซื้อ</th>
+                            <th>👤 พนักงาน</th>
                         </tr>
                     </thead>
                     <tbody>
                     <?php if ($result && $result->num_rows > 0): ?>
                         <?php while ($row = $result->fetch_assoc()): ?>
                         <tr>
-                            <td class="col-id">#<?php echo $row['user_id']; ?></td>
-                            <td class="col-name"><?php echo htmlspecialchars($row['name']); ?></td>
-                            <td><?php echo htmlspecialchars($row['email']); ?></td>
-                            <td>
-                                <a href="staff_sales_detail.php?id=<?php echo $row['user_id']; ?>"
-                                   class="btn btn-ghost btn-sm">
-                                    📊 ดูยอดขาย
-                                </a>
-                            </td>
+                            <td class="col-id">#<?php echo $row['order_id']; ?></td>
+                            <td><?php echo htmlspecialchars($row['order_date']); ?></td>
+                            <td><?php echo htmlspecialchars($row['name']); ?></td>
                         </tr>
                         <?php endwhile; ?>
                     <?php else: ?>
                         <tr class="empty-row">
-                            <td colspan="4">📭 ยังไม่มีข้อมูลพนักงานในระบบ</td>
+                            <td colspan="3">📭 ยังไม่มีคำสั่งซื้อในระบบ</td>
                         </tr>
                     <?php endif; ?>
                     </tbody>

@@ -1,239 +1,200 @@
 <?php
-// ✅ เชื่อมต่อฐานข้อมูล
+// ========================================
+// FILE: orders.php - ฟอร์มสั่งซื้อสินค้า
+// ========================================
+// ไฟล์นี้ใช้สำหรับสั่งซื้อสินค้า และคำนวณยอดรวม + VAT 7%
+// มีการคำนวณจำนวนสต็อกและปรับราคาตามจำนวน
+// ใช้ Modal Dialog เพื่อเลือกวิธีการชำระเงิน (QR Code หรือ เงินสด)
+// ส่งข้อมูลคำสั่งซื้อไปยัง save_order.php
+
+// เชื่อมต่อฐานข้อมูล
 include "db.php";
 
-// ❌ เช็คว่า login แล้วหรือไม่
-if (!isset($_SESSION['user'])) {
-    header("Location: Login.php");
-    exit();
-}
+// เช็คว่า login แล้วหรือไม่
+if (!isset($_SESSION['user'])) { header("Location: Login.php"); exit(); }
 
-// ✅ ดึงสินค้าทั้งหมดที่มีสต็อก (stock > 0)
-$result = $conn->query("SELECT * FROM products WHERE stock > 0");
+// ดึงข้อมูลผู้ใช้ปัจจุบันจาก session
+$user   = $_SESSION['user'];
+
+// ดึงรายการสินค้าไหล่มวันนี้ (stock > 0 = มีสตัก)
+// - WHERE stock > 0 = ดึงเฉพาะ = ไม่ลบสินค้าที่ไม่มีความมืมขมุ
+$result = $conn->query("SELECT * FROM products WHERE stock > 0 ORDER BY product_name ASC");
 ?>
 <!DOCTYPE html>
 <html lang="th">
 <head>
-<meta charset="UTF-8">
-<title>จัดการคำสั่งซื้อ</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>สั่งซื้อสินค้า — Inventory</title>
+    <link rel="stylesheet" href="../Front/style.css">
 </head>
-<body>
+<body class="dashboard-body">
 
-<!-- 🛒 หัวข้อหลัก -->
-<h2>จัดการคำสั่งซื้อ</h2>
+<!-- ⬅️ แถบด้านข้าง (Sidebar) -->
+<aside class="sidebar">
+    <div class="sidebar-brand">
+        <div class="brand-icon">📦</div>
+        <div class="brand-title">Inventory System</div>
+        <div class="brand-sub">Management Dashboard</div>
+    </div>
+    <div class="sidebar-user">
+        <div class="user-avatar"><?php echo strtoupper(mb_substr($user['name'],0,1)); ?></div>
+        <div>
+            <div class="user-name"><?php echo htmlspecialchars($user['name']); ?></div>
+            <div class="user-role">👑 <?php echo htmlspecialchars($user['role']); ?></div>
+        </div>
+    </div>
+    <nav class="sidebar-nav">
+        <div class="nav-label">เมนูหลัก</div>
+        <a href="dashboard.php"   class="nav-item"><span class="nav-icon">🏠</span> Dashboard</a>
+        <a href="products.php"    class="nav-item"><span class="nav-icon">📦</span> จัดการสินค้า</a>
+        <a href="orders.php"      class="nav-item active"><span class="nav-icon">🛒</span> สั่งซื้อสินค้า</a>
+        <a href="order_list.php"  class="nav-item"><span class="nav-icon">📋</span> รายการคำสั่งซื้อ</a>
+        <a href="staff_sales.php" class="nav-item"><span class="nav-icon">📊</span> ยอดขายพนักงาน</a>
+    </nav>
+    <div class="sidebar-logout">
+        <a href="logout.php" class="logout-btn"><span>🚪</span> ออกจากระบบ</a>
+    </div>
+</aside>
 
-<!-- 📤 ฟอร์มสั่งซื้อ ส่งไปหน้า save_order.php -->
-<form id="order-form" action="save_order.php" method="post">
-  <!-- 🔑 Hidden field เก็บวิธีชำระเงิน (จะเต็มค่าผ่าน JavaScript) -->
-  <input type="hidden" name="payment_method" id="payment_method" value="">
-  
-  <!-- 📊 ตารางแสดงสินค้า -->
-  <table border="1">
-    <tr>
-      <!-- 🏷️ หัวตารางแต่ละคอลัมน์ -->
-      <th>สินค้า</th>
-      <th>ราคา/ชิ้น</th>
-      <th>สต็อก</th>
-      <th>จำนวน</th>
-      <th>ราคารวม</th>
-    </tr>
-    
-    <!-- ✅ วนลูปแสดงสินค้าแต่ละรายการ -->
-    <?php while ($row = $result->fetch_assoc()): ?>
-    <tr>
-      <!-- 📛 ชื่อสินค้า -->
-      <td><?php echo htmlspecialchars($row['product_name']); ?></td>
-      <!-- 💵 ราคาต่อชิ้น -->
-      <td><?php echo number_format($row['price'], 2); ?></td>
-      <!-- 📦 จำนวนสต็อกที่พร้อมขาย -->
-      <td><?php echo $row['stock']; ?></td>
-      <!-- 🔢 กรอกจำนวนที่ต้องการสั่ง -->
-      <td>
-        <!-- 📝 Input กรอกปริมาณ (ต้องไม่เกิน stock, เมื่อเปลี่ยนจะคำนวณราคารวม) -->
-        <input
-          type="number"
-          name="quantity[<?php echo $row['product_id']; ?>]"
-          min="0"
-          max="<?php echo $row['stock']; ?>"
-          value="0"
-          data-price="<?php echo $row['price']; ?>"
-          oninput="calcTotal()"
-        >
-      </td>
-      <!-- 💰 แสดงราคารวมของสินค้านี้ (ราคา × จำนวน) -->
-      <td class="row-total">฿0.00</td>
-    </tr>
-    <?php endwhile; ?>
-  </table>
-  <br>
-  
-  <!-- 💰 แสดงราคาที่เกี่ยวข้อง -->
-  <!-- 📊 ราคาสินค้ารวม (ยังไม่บวก VAT) -->
-  <p>ราคาสินค้ารวม: <span id="subtotal-display">฿0.00</span></p>
-  <!-- 📈 ราคา VAT 7% -->
-  <p>VAT 7%: <span id="vat-display">฿0.00</span></p>
-  <!-- 📌 ยอดรวมทั้งหมด (รวม VAT) -->
-  <p>ยอดรวมทั้งหมด: <span id="total-display">฿0.00</span></p>
+<!-- ➡️ เนื้อหาหลัก -->
+<div class="dash-main">
 
-  <br>
-  <!-- 💳 ปุ่มวิธีชำระเงิน -->
-  <!-- 📱 ปุ่มชำระผ่าน QR Code -->
-  <button type="button" onclick="openPayment('qr')">จ่าย QR Code</button>
-  <!-- 💵 ปุ่มชำระผ่านเงินสด -->
-  <button type="button" onclick="openPayment('cash')">จ่ายเงินสด</button>
-</form>
-<br>
+    <!-- 🔝 แท็บนำทางด้านบน -->
+    <nav class="topnav">
+        <a href="dashboard.php"   class="topnav-tab">🏠 Dashboard</a>
+        <a href="products.php"    class="topnav-tab">📦 จัดการสินค้า</a>
+        <a href="orders.php"      class="topnav-tab active">🛒 สั่งซื้อสินค้า</a>
+        <a href="order_list.php"  class="topnav-tab">📋 รายการคำสั่งซื้อ</a>
+        <a href="staff_sales.php" class="topnav-tab">📊 ยอดขายพนักงาน</a>
+    </nav>
 
-<!-- 🏠 ลิงก์กลับไปหน้า Dashboard -->
-<a href="dashboard.php">กลับหน้า Dashboard</a>
+    <div class="page-content">
 
-<!-- 📱 Modal QR Code Payment -->
-<div id="modal-qr" style="display:none;">
-  <hr>
-  <h3>สแกน QR Code</h3>
-  <!-- 📲 ข้อมูล QR Code (PromptPay) -->
-  <p>[ QR Code PromptPay ]</p>
-  <!-- 💰 แสดงยอดที่ต้องชำระ -->
-  <p>ยอดที่ต้องชำระ: <strong id="qr-amount"></strong></p>
-  <!-- ✅ ปุ่มยืนยันการชำระเงิน -->
-  <button onclick="confirmPayment()">ยืนยันการชำระเงิน</button>
-  <!-- ❌ ปุ่มยกเลิก -->
-  <button onclick="closePayment()">ยกเลิก</button>
+        <!-- 🗺️ เส้นทางการนำทาง -->
+        <div class="breadcrumb">
+            <a href="dashboard.php">หน้าแรก</a>
+            <span class="sep">›</span>
+            <span class="current">สั่งซื้อสินค้า</span>
+        </div>
+
+        <!-- 💰 แถบสรุปยอด -->
+        <div class="order-summary">
+            <div class="sum-item">
+                <div class="sum-label">ราคาสินค้า</div>
+                <div class="sum-value" id="summary-subtotal">฿0.00</div>
+            </div>
+            <div class="sum-divider"></div>
+            <div class="sum-item">
+                <div class="sum-label">VAT 7%</div>
+                <div class="sum-value" id="summary-vat">฿0.00</div>
+            </div>
+            <div class="sum-divider"></div>
+            <div class="sum-item">
+                <div class="sum-label">ยอดรวมทั้งหมด</div>
+                <div class="sum-value total" id="summary-total">฿0.00</div>
+            </div>
+        </div>
+
+        <!-- 📝 ฟอร์มสั่งซื้อ -->
+        <form id="order-form" action="save_order.php" method="post">
+            <input type="hidden" name="payment_method" id="payment_method" value="">
+
+            <div class="card">
+                <div class="card-header">
+                    <h2>🛒 เลือกสินค้าที่ต้องการซื้อ</h2>
+                </div>
+                <div class="table-wrap">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>สินค้า</th>
+                                <th>ราคา/ชิ้น</th>
+                                <th>สต็อก</th>
+                                <th>จำนวน</th>
+                                <th>ราคารวม</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                        <?php while ($row = $result->fetch_assoc()): ?>
+                            <tr data-row>
+                                <td class="col-name"><?php echo htmlspecialchars($row['product_name']); ?></td>
+                                <td class="col-price"><?php echo number_format($row['price'], 2); ?></td>
+                                <td class="col-stock <?php echo $row['stock'] <= 5 ? 'stock-low' : 'stock-ok'; ?>">
+                                    <?php echo $row['stock']; ?>
+                                </td>
+                                <td>
+                                    <input class="qty-input"
+                                           type="number"
+                                           name="quantity[<?php echo $row['product_id']; ?>]"
+                                           min="0"
+                                           max="<?php echo $row['stock']; ?>"
+                                           value="0"
+                                           data-price="<?php echo $row['price']; ?>"
+                                           oninput="calcTotal()">
+                                </td>
+                                <td class="col-subtotal">฿0.00</td>
+                            </tr>
+                        <?php endwhile; ?>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="card-body" style="border-top:1px solid var(--border-soft);">
+                    <div class="pay-buttons">
+                        <button type="button" class="btn btn-primary btn-lg" onclick="openPayment('qr')">
+                            📱 จ่าย QR Code
+                        </button>
+                        <button type="button" class="btn btn-success btn-lg" onclick="openPayment('cash')">
+                            💵 จ่ายเงินสด
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </form>
+
+    </div>
 </div>
 
-<!-- 💵 Modal เงินสด -->
-<div id="modal-cash" style="display:none;">
-  <hr>
-  <h3>ชำระเงินสด</h3>
-  <!-- 💰 แสดงยอดที่ต้องชำระ -->
-  <p>ยอดที่ต้องชำระ: <strong id="cash-amount"></strong></p>
-  <!-- 💵 กรอกจำนวนเงินที่รับมา (จะคำนวณเงินทอนอัตโนมัติ) -->
-  <label>รับเงินมา: <input type="number" id="received" placeholder="0.00" oninput="calcChange()"></label>
-  <!-- 💸 แสดงผลเงินทอนหรือเงินไม่พอ -->
-  <p id="change-result"></p>
-  <!-- ✅ ปุ่มยืนยันการชำระเงิน -->
-  <button onclick="confirmPayment()">ยืนยันการชำระเงิน</button>
-  <!-- ❌ ปุ่มยกเลิก -->
-  <button onclick="closePayment()">ยกเลิก</button>
+<!-- 📱 หน้าต่างเลือกการชำระ QR Code -->
+<div class="modal-overlay" id="modal-qr">
+    <div class="modal-box">
+        <h3>📱 ชำระผ่าน QR Code</h3>
+        <div class="modal-amount">
+            <div class="modal-amount-label">ยอดที่ต้องชำระ</div>
+            <div class="modal-amount-value" id="qr-amount">฿0.00</div>
+        </div>
+        <div class="qr-placeholder">
+            <div class="qr-icon">▦</div>
+            <div>QR Code PromptPay</div>
+        </div>
+        <div class="modal-actions">
+            <button class="btn btn-primary" style="flex:1" onclick="confirmPayment()">✅ ยืนยันการชำระเงิน</button>
+            <button class="btn btn-ghost" onclick="closePayment()">ยกเลิก</button>
+        </div>
+    </div>
 </div>
 
-<!-- 📜 JavaScript สำหรับคำนวณราคา -->
-<script>
-// 💰 ตัวแปรเก็บยอดรวมทั้งหมด
-let grandTotal = 0;
+<!-- 💵 หน้าต่างเลือกการชำระเงินสด -->
+<div class="modal-overlay" id="modal-cash">
+    <div class="modal-box">
+        <h3>💵 ชำระด้วยเงินสด</h3>
+        <div class="modal-amount">
+            <div class="modal-amount-label">ยอดที่ต้องชำระ</div>
+            <div class="modal-amount-value" id="cash-amount">฿0.00</div>
+        </div>
+        <div class="form-group">
+            <label>รับเงินมา (บาท)</label>
+            <input class="form-control" type="number" id="received"
+                   placeholder="0.00" oninput="calcChange()">
+        </div>
+        <div id="change-result" class="change-result"></div>
+        <div class="modal-actions">
+            <button class="btn btn-success" style="flex:1" onclick="confirmPayment()">✅ ยืนยันการชำระเงิน</button>
+            <button class="btn btn-ghost" onclick="closePayment()">ยกเลิก</button>
+        </div>
+    </div>
+</div>
 
-// 📊 ฟังก์ชันคำนวณราคารวม
-function calcTotal() {
-  const rows = document.querySelectorAll('tr');
-  let subtotal = 0;
-  rows.forEach(row => {
-    // ✅ ค้นหา input ที่เก็บราคา
-    const input = row.querySelector('input[data-price]');
-    // ✅ ค้นหา cell ที่เก็บราคารวมของแถว
-    const cell  = row.querySelector('.row-total');
-    if (!input || !cell) return;
-    
-    // 🔢 ดึงค่าจำนวนและราคา
-    const qty      = parseFloat(input.value) || 0;
-    const price    = parseFloat(input.dataset.price) || 0;
-    
-    // 📈 คำนวณราคารวมของสินค้านี้
-    const rowTotal = qty * price;
-    
-    // 📊 อัปเดตแสดงราคารวมของแถว
-    cell.textContent = '฿' + rowTotal.toFixed(2);
-    
-    // ➕ รวมเข้า subtotal
-    subtotal += rowTotal;
-  });
-  
-  // 📊 คำนวณ VAT 7%
-  const vat  = subtotal * 0.07;
-  
-  // 💰 คำนวณยอดรวมทั้งหมด
-  grandTotal = subtotal + vat;
-
-  // 📌 อัปเดตแสดงในหน้า
-  document.getElementById('subtotal-display').textContent = '฿' + subtotal.toFixed(2);
-  document.getElementById('vat-display').textContent      = '฿' + vat.toFixed(2);
-  document.getElementById('total-display').textContent    = '฿' + grandTotal.toFixed(2);
-}
-
-// 💳 ฟังก์ชันเปิด Modal ชำระเงิน
-function openPayment(method) {
-  // ❌ ถ้ายอดรวม = 0 ให้แสดงข้อความเตือน
-  if (grandTotal <= 0) {
-    alert('กรุณาเลือกสินค้าก่อนชำระเงิน');
-    return;
-  }
-  
-  // ✅ บันทึกวิธีชำระเงินไปยัง hidden field
-  document.getElementById('payment_method').value = method;
-  
-  // ❌ ปิด Modal ทั้งสอง Modal ก่อน
-  document.getElementById('modal-qr').style.display   = 'none';
-  document.getElementById('modal-cash').style.display = 'none';
-  
-  // 💰 เตรียมข้อความราคา
-  const fmt = '฿' + grandTotal.toFixed(2);
-  
-  // 📱 ถ้าเลือก QR → เปิด Modal QR Code
-  if (method === 'qr') {
-    document.getElementById('qr-amount').textContent = fmt;
-    document.getElementById('modal-qr').style.display = 'block';
-  } else {
-    // 💵 ถ้าเลือก Cash → เปิด Modal เงินสด
-    document.getElementById('cash-amount').textContent = fmt;
-    document.getElementById('modal-cash').style.display = 'block';
-    document.getElementById('received').value = '';
-    document.getElementById('change-result').textContent = '';
-  }
-}
-
-// ❌ ฟังก์ชันปิด Modal
-function closePayment() {
-  document.getElementById('modal-qr').style.display   = 'none';
-  document.getElementById('modal-cash').style.display = 'none';
-}
-
-// 💸 ฟังก์ชันคำนวณเงินทอน
-function calcChange() {
-  // ✅ ดึงจำนวนเงินที่รับมา
-  const received = parseFloat(document.getElementById('received').value) || 0;
-  
-  // 💸 คำนวณเงินทอน
-  const change   = received - grandTotal;
-  const el       = document.getElementById('change-result');
-  
-  // ⏭️ ถ้ายังไม่ได้กรอกเงิน ให้ไม่แสดงอะไร
-  if (received <= 0) { el.textContent = ''; return; }
-  
-  // ❌ ถ้าเงินไม่พอ → แสดงข้อความขาดเงิน
-  if (change < 0) {
-    el.textContent = 'เงินไม่พอ ขาดอีก ฿' + Math.abs(change).toFixed(2);
-  } else {
-    // ✅ ถ้าเงินเพียงพอ → แสดงเงินทอน
-    el.textContent = 'เงินทอน ฿' + change.toFixed(2);
-  }
-}
-
-// ✅ ฟังก์ชันยืนยันการชำระเงิน
-function confirmPayment() {
-  // 💵 ถ้าเลือกชำระแบบเงินสด
-  if (document.getElementById('payment_method').value === 'cash') {
-    // ✅ ดึงจำนวนเงินที่รับมา
-    const received = parseFloat(document.getElementById('received').value) || 0;
-    
-    // ❌ เช็คว่าเงินเพียงพอหรือไม่
-    if (received < grandTotal) {
-      alert('เงินไม่พอครับ!');
-      return;
-    }
-  }
-  
-  // 📤 ส่งฟอร์มไปยัง save_order.php
-  document.getElementById('order-form').submit();
-}
-</script>
+<script src="../Front/main.js"></script>
 </body>
 </html>
